@@ -17,8 +17,8 @@
 // > bazel build //examples/cpp:simple_dp_psi -c opt
 //
 // To run the example, start two terminals:
-// > ./simple_dp_psi -rank 0 -in_path examples/data/psi_1.csv -field_names id 
-// > ./simple_dp_psi -rank 1 -in_path examples/data/psi_2.csv -field_names id -out_path /tmp/p2.out
+// > ./bazel-bin/examples/cpp/simple_dp_psi -rank 0 -protocol 1 -in_path examples/data/psi_1.csv -field_names id 
+// > ./bazel-bin/examples/cpp/simple_dp_psi -rank 1 -protocol 1 -in_path examples/data/psi_2.csv -field_names id -out_path /tmp/p2.out
 // clang-format on
 
 #include <fstream>
@@ -80,7 +80,7 @@ constexpr uint32_t kLinkWindowSize = 16;
 
 llvm::cl::opt<int> ProtocolOpt(
     "protocol", llvm::cl::init(1),
-    llvm::cl::desc("select psi protocol, see `spu/psi/psi.proto`"));
+    llvm::cl::desc("select psi protocol, 1:sm2; 2:25519"));
 
 llvm::cl::opt<std::string> InPathOpt("in_path", llvm::cl::init("data.csv"),
                                      llvm::cl::desc("psi data in file path "));
@@ -98,8 +98,8 @@ llvm::cl::opt<bool> PrecheckOpt(
     "precheck_input", llvm::cl::init(false),
     llvm::cl::desc("whether precheck input dataset"));
 
-llvm::cl::opt<int> BucketSizeOpt("bucket_size", llvm::cl::init(1 << 20),
-                                 llvm::cl::desc("hash bucket size"));
+llvm::cl::opt<std::string> FieldNamesOpt("field_names", llvm::cl::init("id"),
+                                         llvm::cl::desc("field names "));
 
 int main(int argc, char** argv) {
   llvm::cl::ParseCommandLineOptions(argc, argv);
@@ -131,6 +131,11 @@ int main(int argc, char** argv) {
 
   link_ctx->SetRecvTimeout(kLinkRecvTimeout);
 
+  spu::psi::CurveType curve = spu::psi::CurveType::CURVE_25519;
+  if (ProtocolOpt.getValue() == 1) {
+    curve = spu::psi::CurveType::CURVE_SM2;
+  }
+
   if (Rank.getValue() == 0) {
     yasl::Buffer bob_items_size_buffer = hctx->lctx()->Recv(
         link_ctx->NextRank(), fmt::format("peer items number"));
@@ -142,8 +147,8 @@ int main(int argc, char** argv) {
     size_t alice_sub_sample_size;
     size_t alice_up_sample_size;
     size_t intersection_size = spu::psi::RunDpEcdhPsiAlice(
-        options, link_ctx, items, &alice_sub_sample_size,
-        &alice_up_sample_size);
+        options, link_ctx, items, &alice_sub_sample_size, &alice_up_sample_size,
+        curve);
 
     SPDLOG_INFO("alice_sub_sample_size: {}", alice_sub_sample_size);
     SPDLOG_INFO("alice_up_sample_size: {}", alice_up_sample_size);
@@ -158,7 +163,7 @@ int main(int argc, char** argv) {
 
     size_t bob_sub_sample_size;
     std::vector<size_t> intersection_idx = spu::psi::RunDpEcdhPsiBob(
-        options, link_ctx, items, &bob_sub_sample_size);
+        options, link_ctx, items, &bob_sub_sample_size, curve);
 
     SPDLOG_INFO("bob_sub_sample_size: {}", bob_sub_sample_size);
     SPDLOG_INFO("intersection_idx size: {}", intersection_idx.size());
